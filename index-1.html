@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>XALQ KAMERA — AI Kuzatuv Tizimi</title>
+  <link rel="stylesheet" href="style.css"/>
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+  <!-- COCO-SSD (odam, ob'ekt aniqlash) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <!-- PoseNet (harakat tahlili) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+  <!-- BlazeFace (yuz aniqlash) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     SPLASH / YUKLASH
+════════════════════════════════════════════ -->
+<div id="splash">
+  <div class="splash-inner">
+    <div class="splash-logo">
+      <div class="splash-eye">
+        <div class="splash-iris"></div>
+        <div class="splash-pupil"></div>
+      </div>
+    </div>
+    <div class="splash-title">XALQ KAMERA</div>
+    <div class="splash-sub">AI Kuzatuv Tizimi</div>
+    <div class="splash-bar"><div class="splash-progress" id="splash-progress"></div></div>
+    <div class="splash-status" id="splash-status">AI modellari yuklanmoqda...</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     ASOSIY ILOVA
+════════════════════════════════════════════ -->
+<div id="app" style="display:none;">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">👁</div>
+      <div>
+        <div class="topbar-title">XALQ KAMERA</div>
+        <div class="topbar-sub" id="active-cam-name">Kamera tanlanmagan</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="status-dot" id="ai-status-dot"></div>
+      <div class="alert-bell" id="alert-bell" onclick="showTab('alerts')">
+        🔔<span class="bell-count" id="bell-count" style="display:none">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB BAR -->
+  <div class="tabbar">
+    <div class="tab active" onclick="showTab('live')" id="tab-live">📹 Jonli</div>
+    <div class="tab" onclick="showTab('cameras')" id="tab-cameras">📷 Kameralar</div>
+    <div class="tab" onclick="showTab('alerts')" id="tab-alerts">🚨 Ogohlantirishlar</div>
+    <div class="tab" onclick="showTab('stats')" id="tab-stats">📊 Hisobot</div>
+    <div class="tab" onclick="showTab('settings')" id="tab-settings">⚙️ Sozlama</div>
+  </div>
+
+  <!-- ══════════ JONLI KO'RISH ══════════ -->
+  <div class="page active" id="page-live">
+    <div class="camera-wrap">
+      <!-- Video stream -->
+      <video id="main-video" autoplay playsinline muted></video>
+      <canvas id="main-canvas"></canvas>
+
+      <!-- Overlay ma'lumotlar -->
+      <div class="cam-overlay-top">
+        <div class="cam-badge red" id="rec-badge">⏺ REC</div>
+        <div class="cam-badge" id="fps-badge">0 FPS</div>
+        <div class="cam-badge" id="time-badge">00:00:00</div>
+      </div>
+
+      <div class="cam-overlay-bottom">
+        <div class="cam-stats-row">
+          <div class="cam-stat">
+            <div class="cam-stat-val" id="stat-people">0</div>
+            <div class="cam-stat-lbl">Odam</div>
+          </div>
+          <div class="cam-stat">
+            <div class="cam-stat-val" id="stat-alerts">0</div>
+            <div class="cam-stat-lbl">Signal</div>
+          </div>
+          <div class="cam-stat">
+            <div class="cam-stat-val" id="stat-zone">0</div>
+            <div class="cam-stat-lbl">Zona</div>
+          </div>
+          <div class="cam-stat">
+            <div class="cam-stat-val" id="stat-objects">0</div>
+            <div class="cam-stat-lbl">Ob'ekt</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Xavf signali -->
+      <div class="danger-overlay" id="danger-overlay" style="display:none;">
+        <div class="danger-icon">⚠️</div>
+        <div class="danger-text" id="danger-text">XAVF ANIQLANDI</div>
+      </div>
+
+      <!-- No camera -->
+      <div class="no-cam" id="no-cam">
+        <div style="font-size:48px;">📷</div>
+        <div>Kamera tanlanmagan</div>
+        <button class="btn-primary" onclick="startPhoneCamera()">Telefon Kamerasini Yoqish</button>
+      </div>
+    </div>
+
+    <!-- Jonli ogohlantirishlar -->
+    <div class="live-alerts" id="live-alerts"></div>
+
+    <!-- Zona chizish -->
+    <div class="zone-panel">
+      <div class="zone-panel-title">🔲 Taqiqlangan Zonalar</div>
+      <div class="zone-btns">
+        <button class="btn-zone" onclick="startDrawZone()">+ Zona qo'shish</button>
+        <button class="btn-zone red" onclick="clearZones()">Tozalash</button>
+      </div>
+      <div id="zone-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ KAMERALAR ══════════ -->
+  <div class="page" id="page-cameras">
+    <div class="section-title">📷 Kameralar Boshqaruvi</div>
+
+    <!-- Telefon kamerasi -->
+    <div class="cam-card active-cam" id="phone-cam-card">
+      <div class="cam-card-header">
+        <div class="cam-icon">📱</div>
+        <div>
+          <div class="cam-name">Telefon Kamerasi</div>
+          <div class="cam-status-text" id="phone-cam-status">O'chirilgan</div>
+        </div>
+        <div class="cam-toggle" id="phone-cam-toggle" onclick="togglePhoneCamera()">▶</div>
+      </div>
+      <div class="cam-card-body">
+        <div class="cam-select-row">
+          <label>Kamera:</label>
+          <select id="camera-select" onchange="switchCamera(this.value)">
+            <option value="environment">Orqa kamera</option>
+            <option value="user">Old kamera</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hikvision kameralar -->
+    <div class="section-title" style="margin-top:16px;">📡 Hikvision / IP Kameralar <span class="badge"id="hik-count">0/50</span></div>
+    <div id="hik-list"></div>
+    <button class="btn-primary full" onclick="showAddCamera()">+ Kamera Qo'shish</button>
+
+    <!-- Kamera qo'shish modali -->
+    <div class="modal" id="add-cam-modal" style="display:none;">
+      <div class="modal-box">
+        <div class="modal-title">Yangi Kamera</div>
+        <input class="inp" placeholder="Kamera nomi (mas: Do'kon kirishi)" id="new-cam-name"/>
+        <input class="inp" placeholder="IP manzil (mas: 192.168.1.100)" id="new-cam-ip"/>
+        <input class="inp" placeholder="Port (mas: 554)" id="new-cam-port" value="554"/>
+        <input class="inp" placeholder="Login (mas: admin)" id="new-cam-user" value="admin"/>
+        <input class="inp" placeholder="Parol" id="new-cam-pass" type="password"/>
+        <div style="font-size:11px;color:#7aadc4;margin-bottom:12px;">
+          RTSP manzil: rtsp://login:parol@ip:port/stream
+        </div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="hideAddCamera()">Bekor</button>
+          <button class="btn-primary" onclick="addHikvisionCamera()">Qo'shish</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ OGOHLANTIRISHLAR ══════════ -->
+  <div class="page" id="page-alerts">
+    <div class="alerts-header">
+      <div class="section-title">🚨 Ogohlantirishlar</div>
+      <button class="btn-small" onclick="clearAlerts()">Tozalash</button>
+    </div>
+    <div id="alerts-list">
+      <div class="empty-state">Hozircha ogohlantirish yo'q</div>
+    </div>
+  </div>
+
+  <!-- ══════════ HISOBOT ══════════ -->
+  <div class="page" id="page-stats">
+    <div class="section-title">📊 Kunlik Hisobot</div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">👥</div>
+        <div class="stat-val" id="report-people">0</div>
+        <div class="stat-lbl">Jami odam</div>
+      </div>
+      <div class="stat-card red">
+        <div class="stat-icon">🚨</div>
+        <div class="stat-val" id="report-alerts">0</div>
+        <div class="stat-lbl">Ogohlantirishlar</div>
+      </div>
+      <div class="stat-card yellow">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-val" id="report-suspicious">0</div>
+        <div class="stat-lbl">Shubhali holat</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon">✅</div>
+        <div class="stat-val" id="report-safe">0</div>
+        <div class="stat-lbl">Xavfsiz vaqt (min)</div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px;">⏰ Soatlik Faollik</div>
+    <div class="chart-wrap">
+      <canvas id="hourly-chart" height="120"></canvas>
+    </div>
+
+    <div class="section-title" style="margin-top:16px;">🔴 So'nggi Hodisalar</div>
+    <div id="events-list"></div>
+
+    <div class="section-title" style="margin-top:16px;">📈 Aniqlangan Ob'ektlar</div>
+    <div id="objects-report"></div>
+  </div>
+
+  <!-- ══════════ SOZLAMALAR ══════════ -->
+  <div class="page" id="page-settings">
+    <div class="section-title">⚙️ AI Sozlamalari</div>
+
+    <div class="settings-card">
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Odam aniqlash</div>
+          <div class="setting-desc">Kadrda odamni topish</div>
+        </div>
+        <div class="toggle-sw on" id="sw-person" onclick="toggleSetting('person')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Shubhali harakat</div>
+          <div class="setting-desc">Yugurish, yashirish</div>
+        </div>
+        <div class="toggle-sw on" id="sw-suspicious" onclick="toggleSetting('suspicious')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Yiqilgan odam</div>
+          <div class="setting-desc">Yiqilish holati</div>
+        </div>
+        <div class="toggle-sw on" id="sw-fall" onclick="toggleSetting('fall')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Zona buzish</div>
+          <div class="setting-desc">Taqiqlangan zonaga kirish</div>
+        </div>
+        <div class="toggle-sw on" id="sw-zone" onclick="toggleSetting('zone')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Kamera yopish</div>
+          <div class="setting-desc">Kameraga qo'l yaqinlashsa</div>
+        </div>
+        <div class="toggle-sw on" id="sw-cover" onclick="toggleSetting('cover')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Ko'p odam (olomon)</div>
+          <div class="setting-desc">5+ odam bir joyda</div>
+        </div>
+        <div class="toggle-sw on" id="sw-crowd" onclick="toggleSetting('crowd')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Tungi rejim</div>
+          <div class="setting-desc">Qorong'ida sezgirlik oshadi</div>
+        </div>
+        <div class="toggle-sw" id="sw-night" onclick="toggleSetting('night')"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Ovozli signal</div>
+          <div class="setting-desc">Xavf bo'lsa ovoz chiqarsin</div>
+        </div>
+        <div class="toggle-sw on" id="sw-sound" onclick="toggleSetting('sound')"></div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px;">🎯 Sezgirlik Darajasi</div>
+    <div class="settings-card">
+      <div class="slider-row">
+        <span>Past</span>
+        <input type="range" min="1" max="10" value="7" id="sensitivity-slider" oninput="updateSensitivity(this.value)"/>
+        <span>Yuqori</span>
+      </div>
+      <div style="text-align:center;color:var(--neon);font-family:var(--mono);margin-top:8px;" id="sensitivity-val">7 / 10</div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px;">⚠️ Xavf Zonalari Rangi</div>
+    <div class="settings-card">
+      <div class="color-row">
+        <div class="color-opt selected" style="background:#ff3b5c;" onclick="setZoneColor('#ff3b5c')"></div>
+        <div class="color-opt" style="background:#ff9500;" onclick="setZoneColor('#ff9500')"></div>
+        <div class="color-opt" style="background:#ffcc00;" onclick="setZoneColor('#ffcc00')"></div>
+        <div class="color-opt" style="background:#00ff88;" onclick="setZoneColor('#00ff88')"></div>
+        <div class="color-opt" style="background:#0af;" onclick="setZoneColor('#0af')"></div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px;">ℹ️ Tizim Ma'lumoti</div>
+    <div class="settings-card">
+      <div class="info-row"><span>AI Model:</span><span id="info-model">Yuklanmoqda...</span></div>
+      <div class="info-row"><span>Tahlil tezligi:</span><span id="info-fps">0 FPS</span></div>
+      <div class="info-row"><span>Kameralar:</span><span id="info-cams">0</span></div>
+      <div class="info-row"><span>Ish vaqti:</span><span id="info-uptime">00:00:00</span></div>
+      <div class="info-row"><span>Versiya:</span><span>v1.0.0</span></div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<script src="ai.js"></script>
+</body>
+</html>
